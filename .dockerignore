@@ -1,0 +1,6 @@
+.git
+.direnv
+.env*
+local-test
+__pycache__
+test_sync.py
