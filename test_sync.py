@@ -59,4 +59,22 @@ for auth, bad in [(FakeAuth(['Mitglied', 'Vorstand']), members),
 auth = FakeAuth([], by_email=User(128))
 assert sync.sync_member(auth, FakeWbl(), member('Mitglied', member_id=399)) is None and auth.calls == []
 assert sync.sync_member(auth, FakeWbl(), member('Mitglied', member_id=128)) == 128 and auth.calls == ['update']
+
+# Zulip check: Webling 'Zulip E-Mail' unknown to Zulip, and active Zulip accounts without member
+import io, contextlib
+from weblingclient import WeblingClient
+wbl = WeblingClient.__new__(WeblingClient)
+wbl.members = [
+    {'properties': {'Mitglieder ID': 1, 'Vorname': 'A', 'Name': 'B', 'E-Mail': 'a@x.org', 'Zulip E-Mail': 'a@zulip.org'}},
+    {'properties': {'Mitglieder ID': 2, 'Vorname': 'C', 'Name': 'D', 'E-Mail': 'c@x.org', 'Zulip E-Mail': 'wrong@zulip.org'}},
+    {'properties': {'Mitglieder ID': 3, 'Vorname': 'E', 'Name': 'F', 'E-Mail': 'e@x.org', 'Zulip E-Mail': 'user7@zulip.ow-mainz.de'}},
+]
+out = io.StringIO()
+with contextlib.redirect_stdout(out):
+    sync.check_zulip_emails(wbl, [('a@zulip.org', 'A B', True), ('E@X.ORG', 'E F', True),
+                                  ('stranger@zulip.org', 'S T', True), ('gone@zulip.org', 'G O', False)])
+    sync.check_zulip_emails(wbl, None)
+warnings = out.getvalue()
+assert warnings.count('WARNUNG') == 2 and 'wrong@zulip.org' in warnings and 'stranger@zulip.org' in warnings, warnings
+assert wbl.authentik_email(wbl.members[2]) == 'e@x.org'
 print('ok')

@@ -31,6 +31,7 @@ standardmäßig mit `--loop`.
 | `AUTHENTIK_API_TOKEN` | Token eines Service-Accounts, der Benutzer und Gruppen lesen und schreiben darf |
 | `SYNC_INTERVAL` | Sekunden zwischen zwei Durchläufen im `--loop`-Modus, Standard 600 |
 | `ZULIP_ALERT_WEBHOOK` | Optional. URL eines Zulip-Webhooks vom Typ "Slack incoming"; fehlgeschlagene Durchläufe werden dorthin gemeldet |
+| `ZULIP_URL`, `ZULIP_API_USER`, `ZULIP_API_KEY` | Optional. Zulip-Instanz und API-Zugang eines Zulip-Administrators; wenn gesetzt, warnt der Sync bei jeder in Webling eingetragenen `Zulip E-Mail`, die Zulip nicht kennt, und bei jedem aktiven Zulip-Konto ohne Webling-Mitglied |
 
 Nicht nur docker, sondern auch der Python Code liest eine `.env`-Datei im
 Arbeitsverzeichnis, falls vorhanden.
@@ -50,6 +51,9 @@ Sync, der alle 10 Minuten läuft:
         AUTHENTIK_API_TOKEN: ${WEBLING_SYNC_API_TOKEN:?}
         SYNC_INTERVAL: 600
         ZULIP_ALERT_WEBHOOK: ${ZULIP_ALERT_WEBHOOK:-}
+        ZULIP_URL: ${ZULIP_URL:-}
+        ZULIP_API_USER: ${ZULIP_API_USER:-}
+        ZULIP_API_KEY: ${ZULIP_API_KEY:-}
       depends_on:
         - server
 

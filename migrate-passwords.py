@@ -8,17 +8,16 @@ Die CSV-Datei ist ein Dump von zerver_userprofile (Spalten siehe unten):
   COPY (SELECT delivery_email, full_name, password, is_active, is_bot
         FROM zerver_userprofile ORDER BY delivery_email) TO STDOUT WITH CSV HEADER
 
-Jeder Zulip-Benutzer wird einem Webling-Mitglied zugeordnet (direkt über die
-E-Mail oder über WEBLING_TO_ZULIP_MAP / zulip_to_webling für bekannte
-Adressabweichungen), dann wird der argon2-Hash in authentik_core_user beim
+Jeder Zulip-Benutzer wird über die Felder 'E-Mail' und 'Zulip E-Mail' einem
+Webling-Mitglied zugeordnet, dann wird der argon2-Hash in authentik_core_user beim
 Benutzer mit der Webling-E-Mail eingetragen. Zulip und Authentik speichern
 beide argon2-Hashes im Django-Format, der Hash wird also unverändert kopiert.
 Die API nimmt keine Hashes an, daher der direkte DB-Schreibzugriff
 (Umgebungsvariablen AUTHENTIK_DB_*).
 
 Der Report listet migrierte Benutzer mit abweichender Zulip-/Webling-E-Mail,
-Zulip-Benutzer ohne Webling-Treffer (Zuordnung noch zu prüfen) und
-Webling-Mitglieder ohne Zulip-Konto (kein Passwort zu migrieren).
+Zulip-Benutzer ohne Webling-Treffer und Webling-Mitglieder ohne Zulip-Konto
+(kein Passwort zu migrieren).
 """
 from dotenv import load_dotenv
 load_dotenv()
@@ -30,7 +29,7 @@ import json
 
 from dbclient import AuthentikDb
 from utils import env_value
-from weblingclient import WeblingClient, zulip_to_webling
+from weblingclient import WeblingClient
 
 # Zulip-Konten, die übersprungen werden (Bots, Organisationskonten)
 ignore_emails = json.loads(env_value('IGNORE_EMAILS'))
@@ -53,7 +52,7 @@ def main():
         port = env_value('AUTHENTIK_DB_PORT'))
     auth_db.connect()
 
-    migrated, email_differs, unmatched, known_unmatched, not_in_authentik, no_hash = [], [], [], [], [], []
+    migrated, email_differs, unmatched, not_in_authentik, no_hash = [], [], [], [], []
     matched_webling_emails = set()
 
     with open(csv_path, newline='') as f:
@@ -63,12 +62,7 @@ def main():
                 continue
             member = wbl.search_email(zulip_email)
             if not member:
-                line = f"{zulip_email} ({row['full_name']}, active={row['is_active']})"
-                # explicit None in zulip_to_webling = already checked, no member
-                if zulip_email.lower() in zulip_to_webling:
-                    known_unmatched.append(line)
-                else:
-                    unmatched.append(line)
+                unmatched.append(f"{zulip_email} ({row['full_name']}, active={row['is_active']})")
                 continue
             webling_email = wbl.authentik_email(member)
             matched_webling_emails.add(webling_email.lower())
@@ -93,9 +87,8 @@ def main():
             f.writelines(line + '\n' for line in lines)
             f.write('\n')
         section("Migriert", migrated)
-        section("Migriert, Webling- und Zulip-E-Mail unterschiedlich (über WEBLING_TO_ZULIP_MAP)", email_differs)
-        section("Zulip-Benutzer ohne Webling-Treffer (Zuordnung prüfen)", unmatched)
-        section("Zulip-Benutzer, die bekanntermassen kein Webling-Mitglied sind (zulip_to_webling: None)", known_unmatched)
+        section("Migriert, Webling- und Zulip-E-Mail unterschiedlich", email_differs)
+        section("Zulip-Benutzer ohne Webling-Treffer", unmatched)
         section("Zugeordnet, aber kein Authentik-Benutzer mit der Webling-E-Mail", not_in_authentik)
         section("Zugeordnet, aber kein argon2-Hash in Zulip (nie ein Passwort gesetzt)", no_hash)
         section("Webling-Mitglieder ohne Zulip-Konto (kein Passwort migriert)", no_zulip)

@@ -14,6 +14,13 @@ Exit-Code 1 und eine Meldung auf stderr, wenn ein Status und eine Funktion
 gleich heissen oder eine benötigte Gruppe in Authentik fehlt; dann wird nichts
 geändert.
 
+Sind ZULIP_URL, ZULIP_API_USER und ZULIP_API_KEY gesetzt (API-Key eines
+Zulip-Administrators oder Owners, sonst sind fremde Adressen nicht sichtbar),
+wird die Benutzerliste von Zulip abgeglichen: WARNUNG für jede in Webling
+eingetragene 'Zulip E-Mail', die Zulip nicht kennt, und für jedes aktive
+Zulip-Konto, dessen Adresse zu keinem Mitglied gehört (weder 'E-Mail' noch
+'Zulip E-Mail'). Letztere würde die SCIM-Provisionierung deaktivieren.
+
 Mit --loop läuft der Sync alle SYNC_INTERVAL Sekunden (Standard 600) und
 meldet Fehlschläge an ZULIP_ALERT_WEBHOOK (URL eines Zulip-Webhooks vom Typ
 "Slack incoming"), falls gesetzt.
@@ -24,6 +31,7 @@ load_dotenv()
 
 import json
 import os
+import requests
 import sys
 import time
 import traceback
@@ -48,6 +56,41 @@ def member_active(member):
     props = member['properties']
     end = props['Austrittsdatum']
     return props['Status'] != 'Ausgetreten' and (not end or date.fromisoformat(end) >= date.today())
+
+
+# Zulip-Benutzer (ohne Bots) als Liste von (adresse, name, aktiv), None wenn
+# Zulip nicht konfiguriert oder nicht erreichbar ist.
+def zulip_users():
+    url, user, key = os.getenv('ZULIP_URL'), os.getenv('ZULIP_API_USER'), os.getenv('ZULIP_API_KEY')
+    if not (url and user and key):
+        return None
+    try:
+        response = requests.get(f"{url.rstrip('/')}/api/v1/users", auth=(user, key), timeout=30)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        print(f"WARNUNG: Zulip-Benutzerliste nicht abrufbar, Prüfung der Zulip E-Mails entfällt: {e}")
+        return None
+    return [ ((u.get('delivery_email') or u['email']).lower(), u['full_name'], u['is_active'])
+             for u in response.json()['members'] if not u['is_bot'] ]
+
+
+def check_zulip_emails(wbl, users):
+    if users is None:
+        return
+    users = [ (email.lower(), name, active) for email, name, active in users ]
+    zulip_emails = { email for email, _, _ in users }
+    member_emails = set()
+    for member in wbl.members:
+        props = member['properties']
+        member_emails.add((props['E-Mail'] or '').strip().lower())
+        zulip_email = wbl.zulip_email(member)
+        member_emails.add(zulip_email.lower())
+        if zulip_email and zulip_email.lower() not in zulip_emails:
+            print(f"WARNUNG: Zulip E-Mail {zulip_email} von Mitglied {props['Mitglieder ID']} "
+                  f"({props['Vorname']} {props['Name']}) existiert nicht in Zulip")
+    for email, name, active in users:
+        if active and email not in member_emails:
+            print(f"WARNUNG: Zulip-Konto {email} ({name}) gehört zu keinem Webling-Mitglied")
 
 
 def check_groups(auth, members):
@@ -108,6 +151,7 @@ def main():
     auth = AuthentikClient()
     auth.connect()
     check_groups(auth, wbl.members)
+    check_zulip_emails(wbl, zulip_users())
 
     synced_ids = set()
     for member in wbl.members:
