@@ -24,7 +24,8 @@ class FakeAuth:
     def find_by_webling_id(self, webling_id): return None
     def find_by_email(self, email): return self.by_email
     def update_user(self, *a, **kw): self.calls.append('update'); return True
-    def create_user(self, *a, **kw): self.calls.append('create')
+    def create_user(self, *a, **kw): self.calls.append('create'); return 'new-user'
+    def send_recovery_email(self, user, stage, duration): self.calls.append(('mail', user, stage)); return True
 
 
 class FakeWbl:
@@ -47,18 +48,60 @@ assert not sync.member_active(member('Ausgetreten'))
 
 members = [member('Mitglied', ['Vorstand']), member('Anwartschaft')]
 sync.check_groups(FakeAuth(['Mitglied', 'Vorstand', 'Anwartschaft']), members)
-for auth, bad in [(FakeAuth(['Mitglied', 'Vorstand']), members),
-                  (FakeAuth(['Mitglied', 'Vorstand']), [member('Vorstand', ['Vorstand'])])]:
-    try:
-        sync.check_groups(auth, bad)
-        raise AssertionError('check_groups sollte eigentlich abbrechen, wenn Funktion und Status gleich heißen')
-    except SystemExit as e:
-        assert str(e).startswith('FEHLER')
+try:
+    sync.check_groups(FakeAuth(['Mitglied', 'Vorstand']), [member('Vorstand', ['Vorstand'])])
+    raise AssertionError('check_groups sollte eigentlich abbrechen, wenn Funktion und Status gleich heißen')
+except SystemExit as e:
+    assert str(e).startswith('FEHLER')
+
+# fehlende Gruppe: kein Abbruch, WARNUNG, Meldung nur bei geänderter Menge, NON_MEMBER_VALUES still
+import io, contextlib
+alerts = []
+sync.alert = alerts.append
+out = io.StringIO()
+with contextlib.redirect_stdout(out):
+    assert sync.check_groups(FakeAuth(['Mitglied', 'Vorstand']), members) == {'Anwartschaft'}
+    sync.check_groups(FakeAuth(['Mitglied', 'Vorstand']), members)
+assert out.getvalue().count('WARNUNG') == 2 and len(alerts) == 1 and 'Anwartschaft' in alerts[0], (out.getvalue(), alerts)
+os.environ['NON_MEMBER_VALUES'] = '["Anwartschaft"]'
+out = io.StringIO()
+with contextlib.redirect_stdout(out):
+    assert sync.check_groups(FakeAuth(['Mitglied', 'Vorstand']), members) == {'Anwartschaft'}
+assert 'WARNUNG' not in out.getvalue() and len(alerts) == 1, (out.getvalue(), alerts)
+os.environ.pop('NON_MEMBER_VALUES')
+
+# unbekannter Status: neues Mitglied wird nicht angelegt; unbekannte Funktion: angelegt ohne diese Gruppe;
+# vorhandenes Mitglied behält die bekannten Gruppen
+auth = FakeAuth([])
+assert sync.sync_member(auth, FakeWbl(), member('Erfasst'), {'Erfasst'}) is None and auth.calls == []
+class RecordingAuth(FakeAuth):
+    def update_user(self, *a, **kw): self.calls.append(kw['groupnames']); return True
+    def create_user(self, *a, **kw): self.calls.append(('create', kw['groupnames'])); return 'new-user'
+auth = RecordingAuth([])
+assert sync.sync_member(auth, FakeWbl(), member('Mitglied', ['Neu']), {'Neu'}) == 1 and auth.calls == [('create', ['Mitglied'])], auth.calls
+auth = RecordingAuth([], by_email=User(1))
+assert sync.sync_member(auth, FakeWbl(), member('Mitglied', ['Neu']), {'Neu'}) == 1 and auth.calls == [['Mitglied']], auth.calls
 
 # gemeinsame E-Mail: der Benutzer eines anderen Mitglieds wird nie übernommen
 auth = FakeAuth([], by_email=User(128))
 assert sync.sync_member(auth, FakeWbl(), member('Mitglied', member_id=399)) is None and auth.calls == []
 assert sync.sync_member(auth, FakeWbl(), member('Mitglied', member_id=128)) == 128 and auth.calls == ['update']
+
+# Willkommens-Mail: nur neu angelegte, aktive Mitglieder und nur mit ONBOARDING_EMAIL_STAGE
+os.environ.pop('ONBOARDING_EMAIL_STAGE', None)
+auth = FakeAuth([])
+sync.sync_member(auth, FakeWbl(), member('Mitglied'))
+assert auth.calls == ['create'], auth.calls
+os.environ['ONBOARDING_EMAIL_STAGE'] = 'owm-onboarding-email'
+for m, expected in [(member('Mitglied'), ['create', ('mail', 'new-user', 'owm-onboarding-email')]),
+                    (member('Ausgetreten'), ['create'])]:
+    auth = FakeAuth([])
+    sync.sync_member(auth, FakeWbl(), m)
+    assert auth.calls == expected, auth.calls
+auth = FakeAuth([], by_email=User(1))
+sync.sync_member(auth, FakeWbl(), member('Mitglied'))
+assert auth.calls == ['update'], auth.calls
+os.environ.pop('ONBOARDING_EMAIL_STAGE')
 
 # Zulip check: Webling 'Zulip E-Mail' unknown to Zulip, and active Zulip accounts without member
 import io, contextlib

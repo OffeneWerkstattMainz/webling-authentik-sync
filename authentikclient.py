@@ -87,6 +87,7 @@ class AuthentikClient:
     # werden im Benutzerattribut webling_synced_groups festgehalten; beim Update
     # werden dort verzeichnete Mitgliedschaften, die nicht mehr in groupnames
     # stehen, entfernt. In Authentik manuell vergebene Mitgliedschaften bleiben.
+    # Liefert den angelegten Benutzer.
     def create_user(self, *, email, login, display_name, active, groupnames, attributes={}):
         try:
             request = authentik_client.models.UserRequest(
@@ -97,10 +98,30 @@ class AuthentikClient:
                 email = email,
                 attributes = { **attributes, 'webling_synced_groups': groupnames },
             )
-            self.api.core_users_create(request)
+            return self.api.core_users_create(request)
         except ApiException as e:
             print(f"Benutzer {display_name} ({email}) konnte in Authentik nicht angelegt werden: {e}")
             raise e
+
+    # Schickt eine Mail über die Recovery-API (Link in den Recovery-Flow der
+    # Brand im Kontext als url). stage_name ist die E-Mail-Stage, deren Betreff
+    # und Vorlage verwendet werden. Der Service-Account braucht dafür
+    # authentik_core.reset_user_password und authentik_stages_email.view_emailstage.
+    # Ein Fehler wird nur gemeldet: der Benutzer ist schon angelegt, das Passwort
+    # kann er auch über "Passwort vergessen?" setzen.
+    def send_recovery_email(self, authentik_user, stage_name, token_duration):
+        try:
+            stages = authentik_client.StagesApi(self.api_client).stages_email_list(name=stage_name).results
+            if not stages:
+                print(f"WARNUNG: E-Mail-Stage {stage_name} fehlt in Authentik, keine Mail an {authentik_user.email}")
+                return False
+            request = authentik_client.models.UserRecoveryEmailRequest(
+                email_stage = stages[0].pk, token_duration = token_duration)
+            self.api.core_users_recovery_email_create(authentik_user.pk, request)
+            return True
+        except ApiException as e:
+            print(f"WARNUNG: Mail mit Stage {stage_name} an {authentik_user.email} fehlgeschlagen: {e}")
+            return False
 
     # Liefert True, wenn etwas geändert werden musste.
     def update_user(self, authentik_user, *, email, login, display_name, active,

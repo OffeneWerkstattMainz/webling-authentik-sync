@@ -11,8 +11,15 @@ synchronisierte Authentik-Benutzer, deren Mitglied aus Webling verschwunden ist
 (erkannt am Benutzerattribut webling_id).
 
 Exit-Code 1 und eine Meldung auf stderr, wenn ein Status und eine Funktion
-gleich heissen oder eine benötigte Gruppe in Authentik fehlt; dann wird nichts
-geändert.
+gleich heissen; dann wird nichts geändert.
+
+Ein Status- oder Funktionswert ohne gleichnamige Authentik-Gruppe ist
+unbekannt. Ein Mitglied mit unbekanntem Status wird nicht angelegt; bei einer
+unbekannten Funktion wird es ohne diese Gruppe angelegt, und ein schon
+vorhandener Benutzer behält nur die bekannten Gruppen. Steht der Wert in
+NON_MEMBER_VALUES (JSON-Liste, z. B. ["Erfasst"]), geschieht das stillschweigend,
+sonst gibt es eine WARNUNG pro Wert und eine Meldung an ZULIP_ALERT_WEBHOOK,
+sobald sich die Menge dieser Werte ändert.
 
 Sind ZULIP_URL, ZULIP_API_USER und ZULIP_API_KEY gesetzt (API-Key eines
 Zulip-Administrators oder Owners, sonst sind fremde Adressen nicht sichtbar),
@@ -20,6 +27,12 @@ wird die Benutzerliste von Zulip abgeglichen: WARNUNG für jede in Webling
 eingetragene 'Zulip E-Mail', die Zulip nicht kennt, und für jedes aktive
 Zulip-Konto, dessen Adresse zu keinem Mitglied gehört (weder 'E-Mail' noch
 'Zulip E-Mail'). Letztere würde die SCIM-Provisionierung deaktivieren.
+
+Ist ONBOARDING_EMAIL_STAGE gesetzt (Name einer E-Mail-Stage, bei uns
+owm-onboarding-email), bekommt jedes neu angelegte, aktive Mitglied eine
+Willkommens-Mail. Sie verweist auf die Startseite des Flows owm-recovery, wo das
+Mitglied sich einen kurz gültigen Link zum Setzen des ersten Passworts schicken
+lässt.
 
 Mit --loop läuft der Sync alle SYNC_INTERVAL Sekunden (Standard 600) und
 meldet Fehlschläge an ZULIP_ALERT_WEBHOOK (URL eines Zulip-Webhooks vom Typ
@@ -44,6 +57,12 @@ from utils import unix_name
 from weblingclient import WeblingClient
 
 UNCHANGED = []
+# Werte ohne Gruppe, die beim letzten Durchlauf gemeldet wurden (--loop)
+REPORTED_UNKNOWN = set()
+# Die API legt für die Willkommens-Mail ein Token an; die Vorlage
+# owm/onboarding.html zeigt es nicht (nur die Startseite des Flows owm-recovery),
+# daher die kürzeste Gültigkeit.
+ONBOARDING_TOKEN_DURATION = 'minutes=1'
 
 def groups_of(member):
     props = member['properties']
@@ -99,12 +118,24 @@ def check_groups(auth, members):
     clash = statuses & funktionen
     if clash:
         sys.exit(f"FEHLER: Webling-Status und -Funktion heißen gleich: {sorted(clash)}")
+    # Liefert die Werte ohne Authentik-Gruppe; gewarnt wird nur für die, die
+    # nicht in NON_MEMBER_VALUES stehen.
     missing = auth.missing_groups(statuses | funktionen)
-    if missing:
-        sys.exit(f"FEHLER: Gruppen fehlen in Authentik (in den Blueprint aufnehmen): {sorted(missing)}")
+    unexpected = missing - set(json.loads(os.getenv('NON_MEMBER_VALUES') or '[]'))
+    for name in sorted(unexpected):
+        count = sum(1 for m in members if name in groups_of(m))
+        print(f"WARNUNG: Gruppe '{name}' fehlt in Authentik (in den Blueprint aufnehmen "
+              f"oder in NON_MEMBER_VALUES), betrifft {count} Mitglieder")
+    if unexpected != REPORTED_UNKNOWN:
+        if unexpected:
+            alert(f"webling-authentik-sync: Gruppen fehlen in Authentik (Mitglieder mit so einem "
+                  f"Status werden nicht angelegt): {sorted(unexpected)}")
+        REPORTED_UNKNOWN.clear()
+        REPORTED_UNKNOWN.update(unexpected)
+    return missing
 
 
-def sync_member(auth, wbl, member):
+def sync_member(auth, wbl, member, unknown_groups=frozenset()):
     props = member['properties']
     member_id = props['Mitglieder ID']
     email = wbl.authentik_email(member)
@@ -113,7 +144,7 @@ def sync_member(auth, wbl, member):
         return None
     name = f"{props['Vorname'].strip()} {props['Name'].strip()}"
     login = unix_name(f"{name}.{member_id}")
-    groups = groups_of(member)
+    groups = [g for g in groups_of(member) if g not in unknown_groups]
     active = member_active(member)
     attributes = {'webling_id': member_id}
 
@@ -129,10 +160,16 @@ def sync_member(auth, wbl, member):
             print(f"Aktualisiert {email}: name={name}, aktiv={active}, gruppen={groups}")
         else:
             UNCHANGED.append(member_id)
+    elif props['Status'] in unknown_groups:
+        # nur ein bekannter Status macht ein neues Mitglied; unbekannte Funktionen werden ignoriert
+        return None
     else:
         print(f"Angelegt {email}: name={name}, aktiv={active}, gruppen={groups}")
-        auth.create_user(email=email, login=login, display_name=name,
-                         active=active, groupnames=groups, attributes=attributes)
+        user = auth.create_user(email=email, login=login, display_name=name,
+                                active=active, groupnames=groups, attributes=attributes)
+        stage = os.getenv('ONBOARDING_EMAIL_STAGE')
+        if active and stage and auth.send_recovery_email(user, stage, ONBOARDING_TOKEN_DURATION):
+            print(f"Willkommens-Mail an {email} gesendet")
     return member_id
 
 
@@ -150,12 +187,12 @@ def main():
     wbl.fetch_members()
     auth = AuthentikClient()
     auth.connect()
-    check_groups(auth, wbl.members)
+    unknown_groups = check_groups(auth, wbl.members)
     check_zulip_emails(wbl, zulip_users())
 
     synced_ids = set()
     for member in wbl.members:
-        member_id = sync_member(auth, wbl, member)
+        member_id = sync_member(auth, wbl, member, unknown_groups)
         if member_id:
             synced_ids.add(member_id)
 

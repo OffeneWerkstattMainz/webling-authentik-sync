@@ -5,8 +5,16 @@ den Webling Feldern *Status* und *Funktion* bestimmen, in welche (gleichnamigen)
 Gruppen in Authentik das Mitglied eingruppiert wird.
 
 Die Gruppen müssen vorab (bei uns mittels eines Blueprints) angelegt werden. Der
-Sync vergibt nur die Mitgliedschaften und bricht ab, wenn eine Gruppe fehlt oder
-ein Status und eine Funktion gleich heißen.
+Sync vergibt nur die Mitgliedschaften und bricht ab, wenn ein Status und eine
+Funktion gleich heißen.
+
+Ein Status- oder Funktionswert ohne gleichnamige Gruppe ist unbekannt: Mitglieder
+mit unbekanntem Status werden nicht angelegt, bei einer unbekannten Funktion
+fehlt nur diese Gruppe, und schon vorhandene Benutzer behalten nur die bekannten
+Gruppen. Für Werte in `NON_MEMBER_VALUES` geschieht
+das stillschweigend, für alle anderen gibt es eine WARNUNG und eine Meldung an
+`ZULIP_ALERT_WEBHOOK`, sobald sich die Menge dieser Werte ändert. Eine neue
+Gruppe im Blueprint genügt, damit der nächste Durchlauf die Mitglieder anlegt.
 
 Deaktivierung ausgetretener Mitglieder: wenn der Status in Webling "Ausgetreten"
 lautet und entweder kein Datum für "Austrittsdatum" eingetragen wurde oder das
@@ -29,6 +37,8 @@ standardmäßig mit `--loop`.
 | `WEBLING_API_KEY` | Webling-API-Key mit Lesezugriff auf die Mitglieder |
 | `AUTHENTIK_API_URL` | `https://<host>/api/v3` (innerhalb des Compose-Stacks: `http://server:9000/api/v3`) |
 | `AUTHENTIK_API_TOKEN` | Token eines Service-Accounts, der Benutzer und Gruppen lesen und schreiben darf |
+| `ONBOARDING_EMAIL_STAGE` | Optional. Name einer E-Mail-Stage (bei uns `owm-onboarding-email`); wenn gesetzt, bekommt jedes neu angelegte, aktive Mitglied deren Mail. Unsere Vorlage `owm/onboarding.html` enthält keinen Token-Link, sondern verweist auf die Startseite des Flows `owm-recovery`, wo das Mitglied sich einen 30 Minuten gültigen Link zum Setzen des ersten Passworts schicken lässt. Der Service-Account braucht dafür zusätzlich die Rechte `authentik_core.reset_user_password` und `authentik_stages_email.view_emailstage` |
+| `NON_MEMBER_VALUES` | Optional. JSON-Liste von Status- oder Funktionswerten ohne Authentik-Gruppe, die keine Mitgliedschaft bedeuten (z. B. `["Erfasst"]`): dafür gibt es keine WARNUNG; Mitglieder mit so einem Status werden nicht angelegt |
 | `SYNC_INTERVAL` | Sekunden zwischen zwei Durchläufen im `--loop`-Modus, Standard 600 |
 | `ZULIP_ALERT_WEBHOOK` | Optional. URL eines Zulip-Webhooks vom Typ "Slack incoming"; fehlgeschlagene Durchläufe werden dorthin gemeldet |
 | `ZULIP_URL`, `ZULIP_API_USER`, `ZULIP_API_KEY` | Optional. Zulip-Instanz und API-Zugang eines Zulip-Administrators; wenn gesetzt, warnt der Sync bei jeder in Webling eingetragenen `Zulip E-Mail`, die Zulip nicht kennt, und bei jedem aktiven Zulip-Konto ohne Webling-Mitglied |
@@ -51,6 +61,7 @@ Sync, der alle 10 Minuten läuft:
         AUTHENTIK_API_TOKEN: ${WEBLING_SYNC_API_TOKEN:?}
         SYNC_INTERVAL: 600
         ZULIP_ALERT_WEBHOOK: ${ZULIP_ALERT_WEBHOOK:-}
+        ONBOARDING_EMAIL_STAGE: owm-onboarding-email
         ZULIP_URL: ${ZULIP_URL:-}
         ZULIP_API_USER: ${ZULIP_API_USER:-}
         ZULIP_API_KEY: ${ZULIP_API_KEY:-}
