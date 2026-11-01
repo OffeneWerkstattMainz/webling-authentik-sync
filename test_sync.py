@@ -45,6 +45,10 @@ assert sync.member_active(member('Mitglied'))
 assert sync.member_active(member('Mitglied', end=today))
 assert not sync.member_active(member('Mitglied', end=yesterday))
 assert not sync.member_active(member('Ausgetreten'))
+os.environ['NON_MEMBER_VALUES'] = '["Ausgeschlossen"]'
+assert not sync.member_active(member('Ausgeschlossen')) and sync.member_active(member('Mitglied'))
+os.environ.pop('NON_MEMBER_VALUES')
+assert sync.member_active(member('Ausgeschlossen'))
 
 members = [member('Mitglied', ['Vorstand']), member('Anwartschaft')]
 sync.check_groups(FakeAuth(['Mitglied', 'Vorstand', 'Anwartschaft']), members)

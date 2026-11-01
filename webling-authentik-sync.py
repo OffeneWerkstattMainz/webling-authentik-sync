@@ -17,9 +17,10 @@ Ein Status- oder Funktionswert ohne gleichnamige Authentik-Gruppe ist
 unbekannt. Ein Mitglied mit unbekanntem Status wird nicht angelegt; bei einer
 unbekannten Funktion wird es ohne diese Gruppe angelegt, und ein schon
 vorhandener Benutzer behält nur die bekannten Gruppen. Steht der Wert in
-NON_MEMBER_VALUES (JSON-Liste, z. B. ["Erfasst"]), geschieht das stillschweigend,
-sonst gibt es eine WARNUNG pro Wert und eine Meldung an ZULIP_ALERT_WEBHOOK,
-sobald sich die Menge dieser Werte ändert.
+NON_MEMBER_VALUES (JSON-Liste, z. B. ["Erfasst", "Ausgeschlossen"]), geschieht das
+stillschweigend, sonst gibt es eine WARNUNG pro Wert und eine Meldung an
+ZULIP_ALERT_WEBHOOK, sobald sich die Menge dieser Werte ändert. Ein vorhandener
+Benutzer, dessen Status in NON_MEMBER_VALUES steht, wird deaktiviert.
 
 Sind ZULIP_URL, ZULIP_API_USER und ZULIP_API_KEY gesetzt (API-Key eines
 Zulip-Administrators oder Owners, sonst sind fremde Adressen nicht sichtbar),
@@ -69,12 +70,17 @@ def groups_of(member):
     return ([props['Status']] if props['Status'] else []) + (props['Funktion'] or [])
 
 
+def non_member_values():
+    return set(json.loads(os.getenv('NON_MEMBER_VALUES') or '[]'))
+
+
 def member_active(member):
-    # Ausgetreten: sofort. Sonst aktiv bis einschliesslich Austrittsdatum,
-    # deaktiviert ab dem Folgetag.
+    # Ausgetreten oder ein Status aus NON_MEMBER_VALUES: sofort. Sonst aktiv bis
+    # einschliesslich Austrittsdatum, deaktiviert ab dem Folgetag.
     props = member['properties']
     end = props['Austrittsdatum']
-    return props['Status'] != 'Ausgetreten' and (not end or date.fromisoformat(end) >= date.today())
+    return (props['Status'] != 'Ausgetreten' and props['Status'] not in non_member_values()
+            and (not end or date.fromisoformat(end) >= date.today()))
 
 
 # Zulip-Benutzer (ohne Bots) als Liste von (adresse, name, aktiv), None wenn
@@ -121,7 +127,7 @@ def check_groups(auth, members):
     # Liefert die Werte ohne Authentik-Gruppe; gewarnt wird nur für die, die
     # nicht in NON_MEMBER_VALUES stehen.
     missing = auth.missing_groups(statuses | funktionen)
-    unexpected = missing - set(json.loads(os.getenv('NON_MEMBER_VALUES') or '[]'))
+    unexpected = missing - non_member_values()
     for name in sorted(unexpected):
         count = sum(1 for m in members if name in groups_of(m))
         print(f"WARNUNG: Gruppe '{name}' fehlt in Authentik (in den Blueprint aufnehmen "
