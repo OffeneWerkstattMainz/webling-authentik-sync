@@ -43,6 +43,7 @@ standardmäßig mit `--loop`.
 | `SYNC_INTERVAL` | Sekunden zwischen zwei Durchläufen im `--loop`-Modus, Standard 600 |
 | `ZULIP_ALERT_WEBHOOK` | Optional. URL eines Zulip-Webhooks vom Typ "Slack incoming"; fehlgeschlagene Durchläufe werden dorthin gemeldet |
 | `ZULIP_URL`, `ZULIP_API_USER`, `ZULIP_API_KEY` | Optional. Zulip-Instanz und API-Zugang eines Zulip-Administrators; wenn gesetzt, warnt der Sync bei jeder in Webling eingetragenen `Zulip E-Mail`, die Zulip nicht kennt, und bei jedem aktiven Zulip-Konto ohne Webling-Mitglied |
+| `ZULIP_DEACTIVATE` | Optional, braucht die drei `ZULIP_*`-Variablen darüber. `1` = am Ende jedes Durchlaufs das Zulip-Konto jedes inaktiven Mitglieds deaktivieren (gleiche Adresse wie in Authentik; Owner ausgenommen). Name, Bild und Nachrichten bleiben. Nötig, weil die SCIM-Provisionierung ausgetretene Mitglieder in Zulip nicht deaktiviert |
 
 Nicht nur docker, sondern auch der Python Code liest eine `.env`-Datei im
 Arbeitsverzeichnis, falls vorhanden.
@@ -66,6 +67,7 @@ Sync, der alle 10 Minuten läuft:
         ZULIP_URL: ${ZULIP_URL:-}
         ZULIP_API_USER: ${ZULIP_API_USER:-}
         ZULIP_API_KEY: ${ZULIP_API_KEY:-}
+        ZULIP_DEACTIVATE: ${ZULIP_DEACTIVATE:-}
       depends_on:
         - server
 

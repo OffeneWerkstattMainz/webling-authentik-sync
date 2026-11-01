@@ -124,4 +124,30 @@ with contextlib.redirect_stdout(out):
 warnings = out.getvalue()
 assert warnings.count('WARNUNG') == 2 and 'wrong@zulip.org' in warnings and 'stranger@zulip.org' in warnings, warnings
 assert wbl.authentik_email(wbl.members[2]) == 'e@x.org'
+# Zulip-Deaktivierung: nur inaktive Webling-Benutzer mit aktivem Zulip-Konto, nie Owner, nur mit ZULIP_DEACTIVATE=1
+class AkUser:
+    def __init__(self, email, active, webling_id=1):
+        self.email, self.is_active, self.attributes = email, active, ({'webling_id': webling_id} if webling_id else {})
+class ListAuth:
+    def list_users(self):
+        return [AkUser('gone@x.org', False), AkUser('Owner@x.org', False), AkUser('here@x.org', True),
+                AkUser('admin@x.org', False, webling_id=None), AkUser('nozulip@x.org', False),
+                AkUser('already@x.org', False)]
+zusers = [('gone@x.org', 'G', True, 11, 400), ('owner@x.org', 'O', True, 12, 100), ('here@x.org', 'H', True, 13, 400),
+          ('admin@x.org', 'A', True, 14, 200), ('already@x.org', 'X', False, 15, 400)]
+deleted = []
+class Resp:
+    def raise_for_status(self): pass
+sync.requests.delete = lambda url, **kw: deleted.append(url) or Resp()
+os.environ.update(ZULIP_URL='https://z', ZULIP_API_USER='u', ZULIP_API_KEY='k')
+sync.deactivate_zulip_accounts(ListAuth(), zusers)
+assert deleted == [], deleted
+os.environ['ZULIP_DEACTIVATE'] = '1'
+out = io.StringIO()
+with contextlib.redirect_stdout(out):
+    sync.deactivate_zulip_accounts(ListAuth(), zusers)
+    sync.deactivate_zulip_accounts(ListAuth(), None)
+assert deleted == ['https://z/api/v1/users/11'], deleted
+assert 'owner@x.org gehört einem Owner' in out.getvalue(), out.getvalue()
+os.environ.pop('ZULIP_DEACTIVATE')
 print('ok')

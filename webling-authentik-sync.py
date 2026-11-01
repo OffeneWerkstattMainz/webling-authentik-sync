@@ -27,7 +27,9 @@ Zulip-Administrators oder Owners, sonst sind fremde Adressen nicht sichtbar),
 wird die Benutzerliste von Zulip abgeglichen: WARNUNG für jede in Webling
 eingetragene 'Zulip E-Mail', die Zulip nicht kennt, und für jedes aktive
 Zulip-Konto, dessen Adresse zu keinem Mitglied gehört (weder 'E-Mail' noch
-'Zulip E-Mail'). Letztere würde die SCIM-Provisionierung deaktivieren.
+'Zulip E-Mail'). Letztere würde die SCIM-Provisionierung deaktivieren. Mit
+ZULIP_DEACTIVATE=1 deaktiviert der Sync außerdem das Zulip-Konto jedes inaktiven
+Mitglieds (siehe deactivate_zulip_accounts).
 
 Ist ONBOARDING_EMAIL_STAGE gesetzt (Name einer E-Mail-Stage, bei uns
 owm-onboarding-email), bekommt jedes neu angelegte, aktive Mitglied eine
@@ -83,8 +85,8 @@ def member_active(member):
             and (not end or date.fromisoformat(end) >= date.today()))
 
 
-# Zulip-Benutzer (ohne Bots) als Liste von (adresse, name, aktiv), None wenn
-# Zulip nicht konfiguriert oder nicht erreichbar ist.
+# Zulip-Benutzer (ohne Bots) als Liste von (adresse, name, aktiv, user_id, rolle),
+# None wenn Zulip nicht konfiguriert oder nicht erreichbar ist.
 def zulip_users():
     url, user, key = os.getenv('ZULIP_URL'), os.getenv('ZULIP_API_USER'), os.getenv('ZULIP_API_KEY')
     if not (url and user and key):
@@ -95,14 +97,15 @@ def zulip_users():
     except requests.exceptions.RequestException as e:
         print(f"WARNUNG: Zulip-Benutzerliste nicht abrufbar, Prüfung der Zulip E-Mails entfällt: {e}")
         return None
-    return [ ((u.get('delivery_email') or u['email']).lower(), u['full_name'], u['is_active'])
+    return [ ((u.get('delivery_email') or u['email']).lower(), u['full_name'], u['is_active'],
+              u['user_id'], u.get('role'))
              for u in response.json()['members'] if not u['is_bot'] ]
 
 
 def check_zulip_emails(wbl, users):
     if users is None:
         return
-    users = [ (email.lower(), name, active) for email, name, active in users ]
+    users = [ (email.lower(), name, active) for email, name, active, *_ in users ]
     zulip_emails = { email for email, _, _ in users }
     member_emails = set()
     for member in wbl.members:
@@ -179,6 +182,37 @@ def sync_member(auth, wbl, member, unknown_groups=frozenset()):
     return member_id
 
 
+ZULIP_ROLE_OWNER = 100
+
+
+# Mit ZULIP_DEACTIVATE=1: deaktiviert das Zulip-Konto jedes inaktiven, aus Webling
+# stammenden Authentik-Benutzers mit gleicher Adresse. Die SCIM-Provisionierung
+# kann das nicht: ein Benutzer ohne Gruppe mit Zulip-Zugang fällt aus ihrem
+# Bereich, Authentik schickt DELETE, und Zulip lehnt DELETE ab. Name, Bild und
+# Nachrichten bleiben (https://zulip.com/api/deactivate-user ohne "actions").
+def deactivate_zulip_accounts(auth, users):
+    if users is None or os.getenv('ZULIP_DEACTIVATE') != '1':
+        return
+    url, api_user, key = os.getenv('ZULIP_URL'), os.getenv('ZULIP_API_USER'), os.getenv('ZULIP_API_KEY')
+    active = {email: (user_id, role) for email, _, is_active, user_id, role in users if is_active}
+    for user in auth.list_users():
+        if not (user.attributes or {}).get('webling_id') or user.is_active:
+            continue
+        email = (user.email or '').strip().lower()
+        if email not in active:
+            continue
+        user_id, role = active[email]
+        if role == ZULIP_ROLE_OWNER:
+            print(f"WARNUNG: Zulip-Konto {email} gehört einem Owner, nicht deaktiviert")
+            continue
+        try:
+            requests.delete(f"{url.rstrip('/')}/api/v1/users/{user_id}", auth=(api_user, key),
+                            timeout=30).raise_for_status()
+            print(f"Zulip-Konto {email} deaktiviert")
+        except requests.exceptions.RequestException as e:
+            print(f"WARNUNG: Zulip-Konto {email} konnte nicht deaktiviert werden: {e}")
+
+
 def deactivate_leavers(auth, synced_ids):
     for user in auth.list_users():
         webling_id = (user.attributes or {}).get('webling_id')
@@ -194,7 +228,8 @@ def main():
     auth = AuthentikClient()
     auth.connect()
     unknown_groups = check_groups(auth, wbl.members)
-    check_zulip_emails(wbl, zulip_users())
+    zulip = zulip_users()
+    check_zulip_emails(wbl, zulip)
 
     synced_ids = set()
     for member in wbl.members:
@@ -203,6 +238,7 @@ def main():
             synced_ids.add(member_id)
 
     deactivate_leavers(auth, synced_ids)
+    deactivate_zulip_accounts(auth, zulip)
     print(f"Fertig: {len(synced_ids)} Mitglieder synchronisiert, davon {len(UNCHANGED)} unverändert.")
 
 
