@@ -150,4 +150,38 @@ with contextlib.redirect_stdout(out):
 assert deleted == ['https://z/api/v1/users/11'], deleted
 assert 'owner@x.org gehört einem Owner' in out.getvalue(), out.getvalue()
 os.environ.pop('ZULIP_DEACTIVATE')
+# Nextcloud-Deaktivierung: nur inaktive Webling-Benutzer mit aktivem Konto, nie der API-Benutzer
+class NcUser(AkUser):
+    def __init__(self, email, active, username, ncid=None, webling_id=1):
+        super().__init__(email, active, webling_id)
+        self.username = username
+        if ncid: self.attributes['nextcloud_user_id'] = ncid
+class NcAuth:
+    def list_users(self):
+        return [NcUser('a@x', False, 'anna_1', 'AnnaN'), NcUser('b@x', False, 'bob_2'), NcUser('c@x', True, 'carl_3', 'CarlN'),
+                NcUser('d@x', False, 'dora_4', 'DoraN'), NcUser('e@x', False, 'eve_5', 'gone'), NcUser('f@x', False, 'api', 'api'),
+                NcUser('g@x', False, 'gus_7', 'GusN', webling_id=None)]
+nc_state = {'AnnaN': True, 'bob_2': True, 'CarlN': True, 'DoraN': False, 'api': True, 'GusN': True}
+calls = []
+class NcResp:
+    def __init__(self, code, data=None): self.status_code, self.data = code, data
+    def raise_for_status(self):
+        if self.status_code >= 400: raise sync.requests.exceptions.HTTPError(self.status_code)
+    def json(self): return {'ocs': {'data': self.data}}
+class NcSession:
+    def __init__(self): self.headers = {}
+    def get(self, url, **kw):
+        uid = url.rsplit('/', 1)[1]
+        return NcResp(200, {'enabled': nc_state[uid]}) if uid in nc_state else NcResp(404)
+    def put(self, url, **kw):
+        calls.append(url); return NcResp(200)
+sync.requests.Session = NcSession
+os.environ.update(NEXTCLOUD_URL='https://nc', NEXTCLOUD_API_USER='api', NEXTCLOUD_API_PASSWORD='pw')
+sync.deactivate_nextcloud_accounts(NcAuth())
+assert calls == [], calls
+os.environ['NEXTCLOUD_DEACTIVATE'] = '1'
+with contextlib.redirect_stdout(io.StringIO()):
+    sync.deactivate_nextcloud_accounts(NcAuth())
+assert calls == ['https://nc/ocs/v2.php/cloud/users/AnnaN/disable', 'https://nc/ocs/v2.php/cloud/users/bob_2/disable'], calls
+os.environ.pop('NEXTCLOUD_DEACTIVATE')
 print('ok')

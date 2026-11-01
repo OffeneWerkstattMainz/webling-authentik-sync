@@ -29,7 +29,9 @@ eingetragene 'Zulip E-Mail', die Zulip nicht kennt, und für jedes aktive
 Zulip-Konto, dessen Adresse zu keinem Mitglied gehört (weder 'E-Mail' noch
 'Zulip E-Mail'). Letztere würde die SCIM-Provisionierung deaktivieren. Mit
 ZULIP_DEACTIVATE=1 deaktiviert der Sync außerdem das Zulip-Konto jedes inaktiven
-Mitglieds (siehe deactivate_zulip_accounts).
+Mitglieds (siehe deactivate_zulip_accounts). Ebenso mit NEXTCLOUD_DEACTIVATE=1,
+NEXTCLOUD_URL, NEXTCLOUD_API_USER und NEXTCLOUD_API_PASSWORD (Admin, am besten
+App-Passwort) das Nextcloud-Konto (siehe deactivate_nextcloud_accounts).
 
 Ist ONBOARDING_EMAIL_STAGE gesetzt (Name einer E-Mail-Stage, bei uns
 owm-onboarding-email), bekommt jedes neu angelegte, aktive Mitglied eine
@@ -213,6 +215,41 @@ def deactivate_zulip_accounts(auth, users):
             print(f"WARNUNG: Zulip-Konto {email} konnte nicht deaktiviert werden: {e}")
 
 
+# Mit NEXTCLOUD_DEACTIVATE=1: deaktiviert das Nextcloud-Konto jedes inaktiven, aus
+# Webling stammenden Authentik-Benutzers. Ohne das bleiben App-Passwörter,
+# offene Sitzungen und der lokale Login (/login?direct=1) gültig; user_oidc
+# sperrt nur den Login über Authentik. Die Nextcloud-ID ist dieselbe wie im
+# user_id-Claim (blueprints/nextcloud-oidc.yaml): nextcloud_user_id, sonst der
+# Benutzername. Dateien und Freigaben bleiben.
+def deactivate_nextcloud_accounts(auth):
+    url, api_user, password = (os.getenv('NEXTCLOUD_URL'), os.getenv('NEXTCLOUD_API_USER'),
+                               os.getenv('NEXTCLOUD_API_PASSWORD'))
+    if os.getenv('NEXTCLOUD_DEACTIVATE') != '1' or not (url and api_user and password):
+        return
+    session = requests.Session()
+    session.auth = (api_user, password)
+    session.headers.update({'OCS-APIRequest': 'true', 'Accept': 'application/json'})
+    base = f"{url.rstrip('/')}/ocs/v2.php/cloud/users"
+    for user in auth.list_users():
+        attributes = user.attributes or {}
+        if not attributes.get('webling_id') or user.is_active:
+            continue
+        uid = attributes.get('nextcloud_user_id', user.username)
+        if uid == api_user:
+            continue
+        try:
+            response = session.get(f"{base}/{urllib.parse.quote(uid, safe='')}", timeout=30)
+            if response.status_code == 404:
+                continue
+            response.raise_for_status()
+            if not response.json()['ocs']['data']['enabled']:
+                continue
+            session.put(f"{base}/{urllib.parse.quote(uid, safe='')}/disable", timeout=30).raise_for_status()
+            print(f"Nextcloud-Konto {uid} ({user.email}) deaktiviert")
+        except (requests.exceptions.RequestException, KeyError, ValueError) as e:
+            print(f"WARNUNG: Nextcloud-Konto {uid} ({user.email}) konnte nicht deaktiviert werden: {e}")
+
+
 def deactivate_leavers(auth, synced_ids):
     for user in auth.list_users():
         webling_id = (user.attributes or {}).get('webling_id')
@@ -239,6 +276,7 @@ def main():
 
     deactivate_leavers(auth, synced_ids)
     deactivate_zulip_accounts(auth, zulip)
+    deactivate_nextcloud_accounts(auth)
     print(f"Fertig: {len(synced_ids)} Mitglieder synchronisiert, davon {len(UNCHANGED)} unverändert.")
 
 

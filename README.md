@@ -44,6 +44,7 @@ standardmäßig mit `--loop`.
 | `ZULIP_ALERT_WEBHOOK` | Optional. URL eines Zulip-Webhooks vom Typ "Slack incoming"; fehlgeschlagene Durchläufe werden dorthin gemeldet |
 | `ZULIP_URL`, `ZULIP_API_USER`, `ZULIP_API_KEY` | Optional. Zulip-Instanz und API-Zugang eines Zulip-Administrators; wenn gesetzt, warnt der Sync bei jeder in Webling eingetragenen `Zulip E-Mail`, die Zulip nicht kennt, und bei jedem aktiven Zulip-Konto ohne Webling-Mitglied |
 | `ZULIP_DEACTIVATE` | Optional, braucht die drei `ZULIP_*`-Variablen darüber. `1` = am Ende jedes Durchlaufs das Zulip-Konto jedes inaktiven Mitglieds deaktivieren (gleiche Adresse wie in Authentik; Owner ausgenommen). Name, Bild und Nachrichten bleiben. Nötig, weil die SCIM-Provisionierung ausgetretene Mitglieder in Zulip nicht deaktiviert |
+| `NEXTCLOUD_DEACTIVATE`, `NEXTCLOUD_URL`, `NEXTCLOUD_API_USER`, `NEXTCLOUD_API_PASSWORD` | Optional. `NEXTCLOUD_DEACTIVATE=1` = am Ende jedes Durchlaufs das Nextcloud-Konto jedes inaktiven Mitglieds deaktivieren (ID wie im OIDC-Claim: `nextcloud_user_id`, sonst Benutzername), über die OCS-Provisioning-API mit einem Admin-Konto (am besten App-Passwort). Dateien und Freigaben bleiben. Nötig, weil user_oidc nur den Login über Authentik sperrt, nicht App-Passwörter und lokalen Login |
 
 Nicht nur docker, sondern auch der Python Code liest eine `.env`-Datei im
 Arbeitsverzeichnis, falls vorhanden.
@@ -68,6 +69,10 @@ Sync, der alle 10 Minuten läuft:
         ZULIP_API_USER: ${ZULIP_API_USER:-}
         ZULIP_API_KEY: ${ZULIP_API_KEY:-}
         ZULIP_DEACTIVATE: ${ZULIP_DEACTIVATE:-}
+        NEXTCLOUD_URL: ${NEXTCLOUD_URL:-}
+        NEXTCLOUD_API_USER: ${NEXTCLOUD_API_USER:-}
+        NEXTCLOUD_API_PASSWORD: ${NEXTCLOUD_API_PASSWORD:-}
+        NEXTCLOUD_DEACTIVATE: ${NEXTCLOUD_DEACTIVATE:-}
       depends_on:
         - server
 
