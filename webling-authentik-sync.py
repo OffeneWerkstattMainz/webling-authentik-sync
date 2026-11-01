@@ -29,7 +29,8 @@ eingetragene 'Zulip E-Mail', die Zulip nicht kennt, und für jedes aktive
 Zulip-Konto, dessen Adresse zu keinem Mitglied gehört (weder 'E-Mail' noch
 'Zulip E-Mail'). Letztere würde die SCIM-Provisionierung deaktivieren. Mit
 ZULIP_DEACTIVATE=1 deaktiviert der Sync außerdem das Zulip-Konto jedes inaktiven
-Mitglieds (siehe deactivate_zulip_accounts). Ebenso mit NEXTCLOUD_DEACTIVATE=1,
+Mitglieds (siehe deactivate_zulip_accounts). Einen in Zulip gewählten Namen
+übernimmt der Sync ins Attribut zulip_full_name (siehe sync_zulip_names). Ebenso mit NEXTCLOUD_DEACTIVATE=1,
 NEXTCLOUD_URL, NEXTCLOUD_API_USER und NEXTCLOUD_API_PASSWORD (Admin, am besten
 App-Passwort) das Nextcloud-Konto (siehe deactivate_nextcloud_accounts).
 
@@ -187,6 +188,26 @@ def sync_member(auth, wbl, member, unknown_groups=frozenset()):
 ZULIP_ROLE_OWNER = 100
 
 
+# Übernimmt den in Zulip gewählten Namen (Spitzname) ins Authentik-Attribut
+# zulip_full_name, das die SCIM-Abbildung (blueprints/zulip-scim.yaml) statt des
+# Webling-Namens nach Zulip schickt; sonst überschreibt jede SCIM-Aktualisierung
+# den Zulip-Namen. Gleicht der Zulip-Name dem Authentik-Namen, wird das Attribut
+# auf None gesetzt.
+def sync_zulip_names(auth, users):
+    if users is None:
+        return
+    names = {email: name for email, name, is_active, *_ in users if is_active}
+    for user in auth.list_users():
+        attributes = user.attributes or {}
+        email = (user.email or '').strip().lower()
+        if not attributes.get('webling_id') or email not in names:
+            continue
+        wanted = names[email] if names[email] != user.name else None
+        if attributes.get('zulip_full_name') != wanted:
+            auth.set_attribute(user, 'zulip_full_name', wanted)
+            print(f"Zulip-Name von {email}: {wanted!r}")
+
+
 # Mit ZULIP_DEACTIVATE=1: deaktiviert das Zulip-Konto jedes inaktiven, aus Webling
 # stammenden Authentik-Benutzers mit gleicher Adresse. Die SCIM-Provisionierung
 # kann das nicht: ein Benutzer ohne Gruppe mit Zulip-Zugang fällt aus ihrem
@@ -275,6 +296,7 @@ def main():
             synced_ids.add(member_id)
 
     deactivate_leavers(auth, synced_ids)
+    sync_zulip_names(auth, zulip)
     deactivate_zulip_accounts(auth, zulip)
     deactivate_nextcloud_accounts(auth)
     print(f"Fertig: {len(synced_ids)} Mitglieder synchronisiert, davon {len(UNCHANGED)} unverändert.")

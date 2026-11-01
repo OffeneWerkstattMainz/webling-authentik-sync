@@ -184,4 +184,24 @@ with contextlib.redirect_stdout(io.StringIO()):
     sync.deactivate_nextcloud_accounts(NcAuth())
 assert calls == ['https://nc/ocs/v2.php/cloud/users/AnnaN/disable', 'https://nc/ocs/v2.php/cloud/users/bob_2/disable'], calls
 os.environ.pop('NEXTCLOUD_DEACTIVATE')
+# Zulip-Namen: abweichender Zulip-Name landet in zulip_full_name, gleicher Name setzt None
+class NameUser(AkUser):
+    def __init__(self, email, name, attrs=None):
+        super().__init__(email, True)
+        self.name = name
+        self.attributes.update(attrs or {})
+class NameAuth:
+    def __init__(self): self.set = []
+    def list_users(self):
+        return [NameUser('nick@x', 'Kambiz Darabi'), NameUser('same@x', 'Anna B'),
+                NameUser('back@x', 'Toni S', {'zulip_full_name': 'Toni'}), NameUser('kept@x', 'Max M', {'zulip_full_name': 'Maxi'}),
+                NameUser('nozulip@x', 'No Z')]
+    def set_attribute(self, user, key, value): self.set.append((user.email, key, value))
+nusers = [('nick@x', 'Kami Darabi', True, 1, 400), ('same@x', 'Anna B', True, 2, 400), ('back@x', 'Toni S', True, 3, 400),
+          ('kept@x', 'Maxi', True, 4, 400)]
+na = NameAuth()
+with contextlib.redirect_stdout(io.StringIO()):
+    sync.sync_zulip_names(na, nusers)
+    sync.sync_zulip_names(na, None)
+assert na.set == [('nick@x', 'zulip_full_name', 'Kami Darabi'), ('back@x', 'zulip_full_name', None)], na.set
 print('ok')
