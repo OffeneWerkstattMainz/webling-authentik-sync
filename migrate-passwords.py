@@ -15,7 +15,11 @@ beide argon2-Hashes im Django-Format, der Hash wird also unverändert kopiert.
 Die API nimmt keine Hashes an, daher der direkte DB-Schreibzugriff
 (Umgebungsvariablen AUTHENTIK_DB_*).
 
+Kann wiederholt werden: ein Passwort, das der Benutzer in Authentik gesetzt hat,
+wird nicht überschrieben (siehe AuthentikDb.update_password).
+
 Der Report listet migrierte Benutzer mit abweichender Zulip-/Webling-E-Mail,
+in Authentik gesetzte und deshalb behaltene Passwörter,
 Zulip-Benutzer ohne Webling-Treffer und Webling-Mitglieder ohne Zulip-Konto
 (kein Passwort zu migrieren).
 """
@@ -52,7 +56,7 @@ def main():
         port = env_value('AUTHENTIK_DB_PORT'))
     auth_db.connect()
 
-    migrated, email_differs, unmatched, not_in_authentik, no_hash = [], [], [], [], []
+    migrated, email_differs, unmatched, not_in_authentik, no_hash, kept = [], [], [], [], [], []
     matched_webling_emails = set()
 
     with open(csv_path, newline='') as f:
@@ -69,8 +73,12 @@ def main():
             if not row['password'].startswith('argon2$'):
                 no_hash.append(f"{zulip_email} ({row['full_name']})")
                 continue
-            if auth_db.update_password(webling_email, row['password']) == 0:
+            result = auth_db.update_password(webling_email, row['password'])
+            if result == 'missing':
                 not_in_authentik.append(f"{webling_email} (zulip: {zulip_email})")
+                continue
+            if result == 'kept':
+                kept.append(f"{webling_email} (zulip: {zulip_email})")
                 continue
             migrated.append(zulip_email)
             if webling_email.lower() != zulip_email.lower():
@@ -90,6 +98,7 @@ def main():
         section("Migriert, Webling- und Zulip-E-Mail unterschiedlich", email_differs)
         section("Zulip-Benutzer ohne Webling-Treffer", unmatched)
         section("Zugeordnet, aber kein Authentik-Benutzer mit der Webling-E-Mail", not_in_authentik)
+        section("Passwort in Authentik selbst gesetzt, nicht überschrieben", kept)
         section("Zugeordnet, aber kein argon2-Hash in Zulip (nie ein Passwort gesetzt)", no_hash)
         section("Webling-Mitglieder ohne Zulip-Konto (kein Passwort migriert)", no_zulip)
 
