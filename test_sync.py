@@ -124,6 +124,8 @@ with contextlib.redirect_stdout(out):
 warnings = out.getvalue()
 assert warnings.count('WARNUNG') == 2 and 'wrong@zulip.org' in warnings and 'stranger@zulip.org' in warnings, warnings
 assert wbl.authentik_email(wbl.members[2]) == 'e@x.org'
+wbl.members.append({'properties': {'Mitglieder ID': 4, 'Vorname': 'G', 'Name': 'H', 'E-Mail': ' Mixed.Case@X.org ', 'Zulip E-Mail': None}})
+assert wbl.authentik_email(wbl.members[3]) == 'mixed.case@x.org'
 # Zulip-Deaktivierung: nur inaktive Webling-Benutzer mit aktivem Zulip-Konto, nie Owner, nur mit ZULIP_DEACTIVATE=1
 class AkUser:
     def __init__(self, email, active, webling_id=1):

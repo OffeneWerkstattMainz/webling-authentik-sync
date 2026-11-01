@@ -51,8 +51,11 @@ class WeblingClient:
         return zulip_email
 
     # E-Mail des Authentik-Kontos: 'Zulip E-Mail', falls gesetzt, sonst 'E-Mail'.
+    # Kleingeschrieben: Zulips SCIM vergleicht die Adresse beim Aktualisieren mit
+    # Groß-/Kleinschreibung, die Eindeutigkeitsprüfung ohne; abweichende
+    # Schreibweisen enden dort mit 409 "Email address already in use".
     def authentik_email(self, member):
-        return self.zulip_email(member) or (member['properties']['E-Mail'] or '').strip()
+        return (self.zulip_email(member) or (member['properties']['E-Mail'] or '').strip()).lower()
 
     def firstname(self, member):
         return member['properties']['Vorname'].strip()
