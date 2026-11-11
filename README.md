@@ -40,6 +40,7 @@ standardmäßig mit `--loop`.
 | `AUTHENTIK_API_TOKEN` | Token eines Service-Accounts, der Benutzer und Gruppen lesen und schreiben darf |
 | `ONBOARDING_EMAIL_STAGE` | Optional. Name einer E-Mail-Stage (bei uns `owm-onboarding-email`); wenn gesetzt, bekommt jedes neu angelegte, aktive Mitglied deren Mail. Unsere Vorlage `owm/onboarding.html` enthält keinen Token-Link, sondern verweist auf die Startseite des Flows `owm-recovery`, wo das Mitglied sich einen 30 Minuten gültigen Link zum Setzen des ersten Passworts schicken lässt. Der Service-Account braucht dafür zusätzlich die Rechte `authentik_core.reset_user_password` und `authentik_stages_email.view_emailstage` |
 | `NON_MEMBER_VALUES` | Optional. JSON-Liste von Status- oder Funktionswerten ohne Authentik-Gruppe, die keine Mitgliedschaft bedeuten (z. B. `["Erfasst", "Ausgeschlossen"]`): dafür gibt es keine WARNUNG; Mitglieder mit so einem Status werden nicht angelegt, vorhandene Benutzer mit so einem Status deaktiviert |
+| `WEBLING_SYNC_IGNORE_IDS` | Optional. JSON-Liste von Webling `Mitglieder ID`s ohne Konto (z. B. `[55, 444]`, Jugendmitglieder): sie werden nicht angelegt, ein vorhandenes Konto wird deaktiviert |
 | `SYNC_INTERVAL` | Sekunden zwischen zwei Durchläufen im `--loop`-Modus, Standard 600 |
 | `ZULIP_ALERT_WEBHOOK` | Optional. URL eines Zulip-Webhooks vom Typ "Slack incoming"; fehlgeschlagene Durchläufe werden dorthin gemeldet |
 | `ZULIP_URL`, `ZULIP_API_USER`, `ZULIP_API_KEY` | Optional. Zulip-Instanz und API-Zugang eines Zulip-Administrators; wenn gesetzt, warnt der Sync bei jeder in Webling eingetragenen `Zulip E-Mail`, die Zulip nicht kennt, und bei jedem aktiven Zulip-Konto ohne Webling-Mitglied |
@@ -64,6 +65,7 @@ Sync, der alle 10 Minuten läuft:
         AUTHENTIK_API_URL: http://server:9000/api/v3
         AUTHENTIK_API_TOKEN: ${WEBLING_SYNC_API_TOKEN:?}
         SYNC_INTERVAL: 600
+        WEBLING_SYNC_IGNORE_IDS: ${WEBLING_SYNC_IGNORE_IDS:-}
         ZULIP_ALERT_WEBHOOK: ${ZULIP_ALERT_WEBHOOK:-}
         ONBOARDING_EMAIL_STAGE: owm-onboarding-email
         ZULIP_URL: ${ZULIP_URL:-}

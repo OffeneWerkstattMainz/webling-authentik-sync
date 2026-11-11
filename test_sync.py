@@ -91,6 +91,14 @@ auth = FakeAuth([], by_email=User(128))
 assert sync.sync_member(auth, FakeWbl(), member('Mitglied', member_id=399)) is None and auth.calls == []
 assert sync.sync_member(auth, FakeWbl(), member('Mitglied', member_id=128)) == 128 and auth.calls == ['update']
 
+# WEBLING_SYNC_IGNORE_IDS: kein Konto, auch nicht aktualisiert
+os.environ['WEBLING_SYNC_IGNORE_IDS'] = '[55, 444]'
+auth = FakeAuth([], by_email=User(55))
+assert sync.sync_member(auth, FakeWbl(), member('Jugendmitglied', member_id=55)) is None and auth.calls == []
+auth = FakeAuth([])
+assert sync.sync_member(auth, FakeWbl(), member('Jugendmitglied', member_id=888)) == 888 and auth.calls == ['create']
+os.environ.pop('WEBLING_SYNC_IGNORE_IDS')
+
 # Willkommens-Mail: nur neu angelegte, aktive Mitglieder und nur mit ONBOARDING_EMAIL_STAGE
 os.environ.pop('ONBOARDING_EMAIL_STAGE', None)
 auth = FakeAuth([])

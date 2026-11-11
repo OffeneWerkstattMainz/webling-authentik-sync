@@ -22,6 +22,9 @@ stillschweigend, sonst gibt es eine WARNUNG pro Wert und eine Meldung an
 ZULIP_ALERT_WEBHOOK, sobald sich die Menge dieser Werte ändert. Ein vorhandener
 Benutzer, dessen Status in NON_MEMBER_VALUES steht, wird deaktiviert.
 
+Mitglieder, deren 'Mitglieder ID' in WEBLING_SYNC_IGNORE_IDS steht (JSON-Liste,
+z. B. [55, 444]), bekommen kein Konto; ein vorhandenes wird deaktiviert.
+
 Sind ZULIP_URL, ZULIP_API_USER und ZULIP_API_KEY gesetzt (API-Key eines
 Zulip-Administrators oder Owners, sonst sind fremde Adressen nicht sichtbar),
 wird die Benutzerliste von Zulip abgeglichen: WARNUNG für jede in Webling
@@ -150,6 +153,10 @@ def check_groups(auth, members):
 def sync_member(auth, wbl, member, unknown_groups=frozenset()):
     props = member['properties']
     member_id = props['Mitglieder ID']
+    # Ohne Rückgabe landet die ID nicht in synced_ids: ein vorhandenes Konto
+    # deaktiviert deactivate_leavers.
+    if member_id in json.loads(os.getenv('WEBLING_SYNC_IGNORE_IDS') or '[]'):
+        return None
     email = wbl.authentik_email(member)
     if not email:
         print(f"WARNUNG: Mitglied {member_id} ({props['Vorname']} {props['Name']}) hat keine E-Mail, übersprungen")
