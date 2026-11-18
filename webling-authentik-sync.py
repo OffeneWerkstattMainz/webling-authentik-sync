@@ -44,8 +44,10 @@ Mitglied sich einen kurz gültigen Link zum Setzen des ersten Passworts schicken
 lässt.
 
 Mit --loop läuft der Sync alle SYNC_INTERVAL Sekunden (Standard 600) und
-meldet Fehlschläge an ZULIP_ALERT_WEBHOOK (URL eines Zulip-Webhooks vom Typ
-"Slack incoming"), falls gesetzt.
+meldet an ZULIP_ALERT_WEBHOOK (URL eines Zulip-Webhooks vom Typ
+"Slack incoming"), falls gesetzt, wenn ZULIP_ALERT_FAILURE_COUNT (Standard 3) Durchläufe
+hintereinander fehlschlagen; einmal pro Fehlerserie, mit Entwarnung beim
+nächsten erfolgreichen Durchlauf.
 
 """
 from dotenv import load_dotenv
@@ -63,7 +65,7 @@ from datetime import date
 
 from authentikclient import AuthentikClient
 from utils import unix_name
-from weblingclient import WeblingClient
+from weblingclient import WeblingClient, WeblingError
 
 UNCHANGED = []
 # Werte ohne Gruppe, die beim letzten Durchlauf gemeldet wurden (--loop)
@@ -322,15 +324,25 @@ def alert(text):
 
 def loop():
     interval = int(os.getenv('SYNC_INTERVAL', '600'))
+    alert_after = int(os.getenv('ZULIP_ALERT_FAILURE_COUNT', '3'))
+    failures = 0
     while True:
         try:
             main()
-        except SystemExit as e:
-            print(e, file=sys.stderr)
-            alert(f"webling-authentik-sync: {e}")
-        except Exception:
-            traceback.print_exc()
-            alert("webling-authentik-sync fehlgeschlagen:\n```\n" + traceback.format_exc()[-1500:] + "\n```")
+            if failures >= alert_after:
+                alert(f"webling-authentik-sync läuft wieder (nach {failures} fehlgeschlagenen Durchläufen)")
+            failures = 0
+        except (SystemExit, Exception) as e:
+            failures += 1
+            if isinstance(e, SystemExit):
+                print(e, file=sys.stderr)
+            else:
+                traceback.print_exc()
+            # Only the n-th consecutive failure alerts: short Webling outages stay quiet.
+            # The alert carries the message only; the traceback is in the container log.
+            if failures == alert_after:
+                message = str(e) if isinstance(e, (SystemExit, WeblingError)) else f"{type(e).__name__}: {e}"
+                alert(f"webling-authentik-sync {failures}x hintereinander fehlgeschlagen: {message}")
         sys.stdout.flush()
         time.sleep(interval)
 

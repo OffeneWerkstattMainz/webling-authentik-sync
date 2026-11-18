@@ -214,4 +214,53 @@ with contextlib.redirect_stdout(io.StringIO()):
     sync.sync_zulip_names(na, nusers)
     sync.sync_zulip_names(na, None)
 assert na.set == [('nick@x', 'zulip_full_name', 'Kami Darabi'), ('back@x', 'zulip_full_name', None)], na.set
+# Webling-Fehler werden zu lesbaren WeblingError-Meldungen
+import requests, urllib3
+from weblingclient import WeblingError
+def response(code, body=b'', reason='Reason'):
+    r = requests.Response(); r.status_code, r._content, r.reason = code, body, reason
+    return r
+def webling_error(result):
+    def get(*a, **kw):
+        if isinstance(result, Exception): raise result
+        return result
+    orig, wbl.api_key = requests.get, 'k'
+    requests.get = get
+    try:
+        wbl.get_json_from_url('https://w/api')
+        raise AssertionError('WeblingError erwartet')
+    except WeblingError as e:
+        return str(e)
+    finally:
+        requests.get = orig
+dns = urllib3.exceptions.NameResolutionError('w', None, OSError('x'))
+assert webling_error(response(500, b'', 'Internal Server Error')).startswith('Serverfehler bei Webling (HTTP 500 Internal Server Error')
+assert webling_error(response(200)).startswith('Webling lieferte eine leere Antwort (HTTP 200')
+assert webling_error(response(200, b'<html>')).startswith('Webling lieferte kein JSON')
+assert webling_error(response(401)).startswith('Webling lehnt den API-Key ab')
+assert webling_error(response(404)).startswith('Webling lehnt die Anfrage ab')
+assert webling_error(requests.exceptions.ConnectTimeout()).startswith('Webling antwortet nicht')
+assert webling_error(requests.exceptions.ConnectionError(urllib3.exceptions.MaxRetryError(None, 'u', dns))).startswith('Webling-Host nicht per DNS')
+assert webling_error(requests.exceptions.ConnectionError()).startswith('Keine Verbindung zu Webling')
+
+# loop: Alarm erst beim 3. Fehlschlag in Folge, einmal; Entwarnung beim nächsten Erfolg
+runs = iter([WeblingError('weg'), WeblingError('weg'), None, WeblingError('weg'), WeblingError('weg'),
+             WeblingError('weg'), WeblingError('weg'), None])
+def fake_main():
+    r = next(runs)
+    if r: raise r
+def fake_sleep(_):
+    if next(iter_left) == 0: raise StopIteration
+iter_left = iter(range(7, -1, -1))
+alerts.clear()
+sync.main, orig_sleep, sync.time.sleep = fake_main, sync.time.sleep, fake_sleep
+try:
+    with contextlib.redirect_stderr(io.StringIO()):
+        sync.loop()
+except StopIteration:
+    pass
+finally:
+    sync.time.sleep = orig_sleep
+assert alerts == ['webling-authentik-sync 3x hintereinander fehlgeschlagen: weg',
+                  'webling-authentik-sync läuft wieder (nach 4 fehlgeschlagenen Durchläufen)'], alerts
 print('ok')
